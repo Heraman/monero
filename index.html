@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Telegram Monero Balance Bot</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            margin: 20px;
+            background-color: #f4f4f4;
+            color: #333;
+        }
+        .container {
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input[type="text"], input[type="password"] {
+            width: calc(100% - 22px);
+            padding: 10px;
+            margin-bottom: 15px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            padding: 10px 15px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        #status, #log {
+            margin-top: 20px;
+            padding: 10px;
+            border: 1px solid #eee;
+            border-radius: 4px;
+            background-color: #e9ecef;
+            min-height: 50px;
+            white-space: pre-wrap; /* Untuk mempertahankan format baris baru */
+            word-wrap: break-word;
+        }
+        #log {
+             max-height: 300px;
+             overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Telegram Monero Balance Bot</h1>
+
+        <label for="botToken">Token Bot Telegram Anda:</label>
+        <input type="password" id="botToken" placeholder="Masukkan Token Bot Telegram Anda">
+
+        <label for="chatId">Chat ID Telegram Anda:</label>
+        <input type="text" id="chatId" placeholder="Masukkan Chat ID Telegram Anda">
+
+        <label for="moneroAddress">Alamat Monero (Unminable):</label>
+        <input type="text" id="moneroAddress" value="48Bo76HTPfSXsJuhKTE2W8gaC1XUeLGv1djttQtKYFsfBxJnSqft1EKD9iuhzs3F2zijhGunWj4vU4Hj1jPHWhEVHFh6NKL">
+
+        <button onclick="startBot()">Mulai Bot</button>
+        <button onclick="stopBot()" id="stopButton" style="display:none; background-color: #dc3545; margin-left:10px;">Hentikan Bot</button>
+
+        <div id="status">Status: Idle</div>
+        <h3>Log Aktivitas:</h3>
+        <div id="log">Menunggu untuk dimulai...</div>
+    </div>
+
+    <script>
+        const moneroApiUrlBase = "https://api.unminable.com/v5/address/";
+        const coin = "XMR";
+
+        let previousBalance = null;
+        let intervalId = null;
+        let botToken = '7635173250:AAHB8oyPSMKVqp4JoipzAIZ2630eDA7tjws';
+        let chatId = '7559874851';
+        let moneroAddress = '48Bo76HTPfSXsJuhKTE2W8gaC1XUeLGv1djttQtKYFsfBxJnSqft1EKD9iuhzs3F2zijhGunWj4vU4Hj1jPHWhEVHFh6NKL';
+
+        const statusDiv = document.getElementById('status');
+        const logDiv = document.getElementById('log');
+        const startButton = document.querySelector('button[onclick="startBot()"]');
+        const stopButton = document.getElementById('stopButton');
+
+
+        function addLog(message) {
+            const now = new Date();
+            const timestamp = now.toLocaleTimeString('id-ID');
+            logDiv.innerHTML = `[${timestamp}] ${message}\n` + logDiv.innerHTML;
+            console.log(`[${timestamp}] ${message}`);
+        }
+
+        async function fetchBalance() {
+            if (!moneroAddress) {
+                addLog("Error: Alamat Monero belum diatur.");
+                statusDiv.textContent = "Error: Alamat Monero kosong!";
+                return null;
+            }
+            const apiUrl = `${moneroApiUrlBase}${moneroAddress}?coin=${coin}`;
+            statusDiv.textContent = "Status: Mengambil saldo...";
+            addLog(`Mengambil saldo dari: ${apiUrl}`);
+
+            try {
+                const response = await fetch(apiUrl);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const data = await response.json();
+                if (data.success && data.data && data.data.balance !== undefined) {
+                    addLog(`Saldo berhasil diambil: ${data.data.balance} ${coin}`);
+                    statusDiv.textContent = `Status: Saldo terakhir ${data.data.balance} ${coin}`;
+                    return data.data.balance;
+                } else {
+                    addLog(`Error: Format data API tidak sesuai. Response: ${JSON.stringify(data)}`);
+                    statusDiv.textContent = "Status: Error mengambil saldo (format tidak sesuai).";
+                    return null;
+                }
+            } catch (error) {
+                addLog(`Error saat mengambil saldo: ${error.message}`);
+                statusDiv.textContent = `Status: Error mengambil saldo - ${error.message}`;
+                console.error("Error fetching balance:", error);
+                return null;
+            }
+        }
+
+        async function sendTelegramMessage(message) {
+            if (!botToken || !chatId) {
+                addLog("Error: Token Bot atau Chat ID belum diatur.");
+                statusDiv.textContent = "Error: Token Bot atau Chat ID kosong!";
+                return;
+            }
+            const telegramApiUrl = `https://api.telegram.org/bot${botToken}/sendMessage`;
+            addLog(`Mengirim pesan ke Telegram: "${message}"`);
+
+            try {
+                const response = await fetch(telegramApiUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        chat_id: chatId,
+                        text: message,
+                        parse_mode: 'Markdown' // Opsional, bisa 'HTML' atau hilangkan
+                    }),
+                });
+                const data = await response.json();
+                if (data.ok) {
+                    addLog("Pesan berhasil dikirim ke Telegram.");
+                } else {
+                    addLog(`Error mengirim pesan ke Telegram: ${data.description}`);
+                    console.error("Error sending Telegram message:", data);
+                }
+            } catch (error) {
+                addLog(`Error koneksi saat mengirim pesan ke Telegram: ${error.message}`);
+                console.error("Network error sending Telegram message:", error);
+            }
+        }
+
+        async function checkAndUpdateBalance() {
+            addLog("Memulai pengecekan saldo...");
+            const currentBalance = await fetchBalance();
+
+            if (currentBalance !== null) {
+                if (previousBalance === null) { // Pengecekan pertama kali
+                    previousBalance = currentBalance;
+                    const message = `💰 Saldo Awal Monero (${coin}): *${currentBalance}*`;
+                    addLog(`Saldo awal terdeteksi: ${currentBalance}. Mengirim notifikasi awal.`);
+                    await sendTelegramMessage(message);
+                } else if (currentBalance !== previousBalance) {
+                    const message = `🚀 Pembaruan Saldo Monero (${coin}):\nLama: *${previousBalance}*\nBaru: *${currentBalance}*`;
+                    addLog(`Saldo berubah dari ${previousBalance} ke ${currentBalance}. Mengirim notifikasi.`);
+                    await sendTelegramMessage(message);
+                    previousBalance = currentBalance;
+                } else {
+                    addLog(`Saldo tidak berubah dari ${previousBalance}. Tidak ada notifikasi dikirim.`);
+                    statusDiv.textContent = `Status: Saldo tidak berubah (${currentBalance} ${coin}).`;
+                }
+            } else {
+                addLog("Gagal mendapatkan saldo saat ini, pengecekan berikutnya akan dicoba lagi.");
+            }
+        }
+
+        function startBot() {
+            botToken = document.getElementById('botToken').value.trim();
+            chatId = document.getElementById('chatId').value.trim();
+            moneroAddress = document.getElementById('moneroAddress').value.trim();
+
+            if (!botToken || !chatId || !moneroAddress) {
+                alert("Harap isi Token Bot, Chat ID, dan Alamat Monero!");
+                addLog("Gagal memulai: Token Bot, Chat ID, atau Alamat Monero kosong.");
+                return;
+            }
+
+            addLog("Bot dimulai...");
+            statusDiv.textContent = "Status: Bot Aktif.";
+            startButton.disabled = true;
+            stopButton.style.display = 'inline-block';
+            document.getElementById('botToken').disabled = true;
+            document.getElementById('chatId').disabled = true;
+            document.getElementById('moneroAddress').disabled = true;
+
+
+            previousBalance = null; // Reset previous balance on new start
+            logDiv.innerHTML = ""; // Bersihkan log sebelumnya
+            addLog(`Bot dimulai dengan Token: [SENSOR], Chat ID: ${chatId}, Alamat: ${moneroAddress}`);
+
+
+            // Jalankan sekali segera, lalu set interval
+            checkAndUpdateBalance();
+            intervalId = setInterval(checkAndUpdateBalance, 60 * 1000); // Setiap 1 menit (60000 ms)
+        }
+
+        function stopBot() {
+            if (intervalId) {
+                clearInterval(intervalId);
+                intervalId = null;
+                addLog("Bot dihentikan.");
+                statusDiv.textContent = "Status: Bot Dihentikan.";
+                startButton.disabled = false;
+                stopButton.style.display = 'none';
+                document.getElementById('botToken').disabled = false;
+                document.getElementById('chatId').disabled = false;
+                document.getElementById('moneroAddress').disabled = false;
+
+            }
+        }
+
+        // Pastikan bot berhenti jika halaman ditutup (walaupun ini tidak selalu reliable)
+        window.addEventListener('beforeunload', () => {
+            if (intervalId) {
+                addLog("Halaman akan ditutup, menghentikan bot.");
+                stopBot();
+            }
+        });
+
+    </script>
+</body>
+</html>
